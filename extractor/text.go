@@ -211,6 +211,7 @@ func (e *Extractor) ExtractText() (string, error) {
 					}
 					yfloat = core.MakeFloat(float64(*yint))
 				}
+
 				if yPos == -1 {
 					yPos = float64(*yfloat)
 				} else if yPos > float64(*yfloat) {
@@ -218,7 +219,10 @@ func (e *Extractor) ExtractText() (string, error) {
 					xPos = float64(*xfloat)
 					yPos = float64(*yfloat)
 					return nil
+				} else {
+					yPos = float64(*yfloat)
 				}
+
 				if xPos == -1 {
 					xPos = float64(*xfloat)
 				} else if xPos < float64(*xfloat) {
