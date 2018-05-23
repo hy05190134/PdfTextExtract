@@ -33,7 +33,7 @@ import (
 
 	lzw1 "golang.org/x/image/tiff/lzw"
 
-	"github.com/unidoc/unidoc/common"
+	"../common"
 )
 
 const (

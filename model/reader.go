@@ -10,6 +10,7 @@ import (
 	"../common"
 	. "../core"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"strconv"
@@ -509,6 +510,22 @@ func NewPdfReader(rs io.ReadSeeker) (*PdfReader, error) {
 	}
 	pdfReader.parser = parser
 
+	isEncrypted, err := pdfReader.parser.IsEncrypted()
+	if err != nil {
+		return nil, err
+	}
+
+	common.Log.Trace("this pdf encrypt: %v", isEncrypted)
+	if isEncrypted {
+		common.Log.Debug("encrypt info: %s", pdfReader.GetEncryptionMethod())
+		if success, err := parser.Decrypt([]byte("")); err != nil {
+			common.Log.Debug("error: decrypt failed, err: %s", err)
+			return nil, err
+		} else if !success {
+			return nil, errors.New("decrypt use empty password failed")
+		}
+	}
+
 	err = pdfReader.loadStructure()
 	if err != nil {
 		return nil, err
@@ -755,6 +772,36 @@ func (this *PdfReader) buildPageList(node *PdfIndirectObject, parent *PdfIndirec
 	}
 
 	return nil
+}
+
+// Returns a string containing some information about the encryption method used.
+// Subject to changes.  May be better to return a standardized struct with information.
+// But challenging due to the many different types supported.
+func (this *PdfReader) GetEncryptionMethod() string {
+	crypter := this.parser.GetCrypter()
+	str := crypter.Filter + " - "
+
+	if crypter.V == 0 {
+		str += "Undocumented algorithm"
+	} else if crypter.V == 1 {
+		// RC4 or AES (bits: 40)
+		str += "RC4: 40 bits"
+	} else if crypter.V == 2 {
+		str += fmt.Sprintf("RC4: %d bits", crypter.Length)
+	} else if crypter.V == 3 {
+		str += "Unpublished algorithm"
+	} else if crypter.V == 4 {
+		// Look at CF, StmF, StrF
+		str += fmt.Sprintf("Stream filter: %s - String filter: %s", crypter.StreamFilter, crypter.StringFilter)
+		str += "; Crypt filters:"
+		for name, cf := range crypter.CryptFilters {
+			str += fmt.Sprintf(" - %s: %s (%d)", name, cf.Cfm, cf.Length)
+		}
+	}
+	perms := crypter.GetAccessPermissions()
+	str += fmt.Sprintf(" - %#v", perms)
+
+	return str
 }
 
 func (this *PdfReader) GetPageList() []*PdfIndirectObject {
