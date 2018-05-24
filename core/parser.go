@@ -1295,6 +1295,10 @@ func (parser *PdfParser) Decrypt(password []byte) (bool, error) {
 	return authenticated, err
 }
 
+func (parser *PdfParser) IsAuthenticated() bool {
+	return parser.crypter.Authenticated
+}
+
 // NewParser creates a new parser for a PDF file via ReadSeeker. Loads the cross reference stream and trailer.
 // An error is returned on failure.
 func NewParser(rs io.ReadSeeker) (*PdfParser, error) {

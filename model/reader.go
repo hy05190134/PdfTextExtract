@@ -614,6 +614,10 @@ func (this *PdfReader) ParseFonts() error {
 
 // Loads the structure of the pdf file: pages, outlines, etc.
 func (this *PdfReader) loadStructure() error {
+	if this.parser.GetCrypter() != nil && !this.parser.IsAuthenticated() {
+		return errors.New("file need to be decrypted first")
+	}
+
 	// Pages.
 	pagesRef, ok := this.parser.GetRootDict().Get("Pages").(*PdfObjectReference)
 	if !ok {
