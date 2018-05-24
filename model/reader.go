@@ -160,6 +160,7 @@ func (this *PdfReader) parsePredefinedCMap(font *Font, unicodeName string) error
 		common.Log.Debug("read file %s failed, %s", cmapToCidFilename, err)
 		return err
 	}
+
 	//common.Log.Debug("charcode_to_cid data: %s\n\n", streamData)
 
 	mCmap, err := cmap.LoadCmapFromData(streamData)
@@ -185,6 +186,17 @@ func (this *PdfReader) parsePredefinedCMap(font *Font, unicodeName string) error
 		return err
 	}
 	font.mCmap = mCmap
+
+	/*
+		    for k, v := range font.mToCidCmap.GetCodeMap() {
+				common.Log.Debug("chartocid, %d: %s", k, v)
+			}
+
+			for k, v := range font.mCmap.GetCodeMap() {
+				common.Log.Debug("cidtounicode, %d, %s", k, v)
+			}
+	*/
+
 	return nil
 }
 
@@ -323,7 +335,7 @@ func (this *PdfReader) getFontInfo(font *Font) error {
 			}
 
 			if descendantFontDict, ok := descendantFontObj.(*PdfObjectDictionary); ok {
-				//handle Adobe-GB1, Adobe-CNS1, Adobe-Japan1, Adobe-Korea1
+				//handle Adobe-GB1, Adobe-CNS1, Adobe-Japan1, Adobe-Korea1 && other have handle
 				if fontSystemInfo, ok := descendantFontDict.Get("CIDSystemInfo").(*PdfObjectDictionary); ok {
 					register := fontSystemInfo.Get("Registry").(*PdfObjectString)
 					ordering := fontSystemInfo.Get("Ordering").(*PdfObjectString)
@@ -336,7 +348,9 @@ func (this *PdfReader) getFontInfo(font *Font) error {
 						registerOrdering == "Adobe-Japan1" || registerOrdering == "Adobe-Korea1" {
 						font.mFontEncoding = registerOrderingSupple
 						unicodeName := registerOrdering + "-UCS2"
-						this.parsePredefinedCMap(font, unicodeName)
+						if !font.mPredefinedCmap {
+							this.parsePredefinedCMap(font, unicodeName)
+						}
 					}
 				}
 
@@ -517,7 +531,7 @@ func NewPdfReader(rs io.ReadSeeker) (*PdfReader, error) {
 
 	common.Log.Trace("this pdf encrypt: %v", isEncrypted)
 	if isEncrypted {
-		common.Log.Debug("encrypt info: %s", pdfReader.GetEncryptionMethod())
+		common.Log.Trace("encrypt info: %s", pdfReader.GetEncryptionMethod())
 		if success, err := parser.Decrypt([]byte("")); err != nil {
 			common.Log.Debug("error: decrypt failed, err: %s", err)
 			return nil, err

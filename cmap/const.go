@@ -18,6 +18,12 @@ const (
 	beginnotdefrange    = "beginnotdefrange"
 	endnotdefrange      = "endnotdefrange"
 
+	begincidrange = "begincidrange"
+	endcidrange   = "endcidrange"
+
+	begincidchar = "begincidchar"
+	endcidchar   = "endcidchar"
+
 	cmapname = "CMapName"
 	cmaptype = "CMapType"
 )

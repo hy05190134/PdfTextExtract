@@ -32,6 +32,10 @@ type CMap struct {
 	codeSpan int8
 }
 
+func (c *CMap) GetCodeMap() map[uint64]string {
+	return c.codeMap
+}
+
 // codespace represents a single codespace range used in the CMap.
 type codespace struct {
 	low  uint64
@@ -76,8 +80,8 @@ func (cmap *CMap) CharcodeBytesToUnicode(src []byte, simpleEncoding []uint, flag
 				buf.WriteString(tgt)
 				break
 			} else if j == maxLen-1 || i+j == len(src)-1 {
-				if !flag {
-					common.Log.Trace("Error: can't map to unicode, need check, src: 0X%X, 0X%X, 0X%X, 0X%X", code, code>>8, code>>16, code>>24)
+				/*if !flag {
+					common.Log.Debug("Error: can't map to unicode, need check, src: 0X%X, 0X%X, 0X%X, 0X%X", code, code>>8, code>>16, code>>24)
 					if i+j-3 > 0 {
 						buf.WriteString(string(src[i+j-3 : i+j+1]))
 					} else {
@@ -87,7 +91,7 @@ func (cmap *CMap) CharcodeBytesToUnicode(src []byte, simpleEncoding []uint, flag
 					for k := 0; k < len(encodingList); k++ {
 						buf.WriteString(encodingList[k])
 					}
-				}
+				}*/
 				break
 			}
 		}
@@ -203,6 +207,16 @@ func (cmap *CMap) parse() error {
 				if err != nil {
 					return err
 				}
+			} else if op.Operand == begincidrange {
+				err := cmap.parseCidrange()
+				if err != nil {
+					return err
+				}
+			} else if op.Operand == begincidchar {
+				err := cmap.parseCidchar()
+				if err != nil {
+					return err
+				}
 			} else if op.Operand == beginnotdefrange {
 				err := cmap.parseNotdefrange()
 				if err != nil {
@@ -286,6 +300,79 @@ func (cmap *CMap) parseCodespaceRange() error {
 	return nil
 }
 
+// parseCidchar parses a bfchar section of a CMap file.
+func (cmap *CMap) parseCidchar() error {
+	for {
+		// Src code.
+		o, err := cmap.parseObject()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		var srcCode uint64
+
+		switch v := o.(type) {
+		case cmapOperand:
+			if v.Operand == endcidchar {
+				return nil
+			}
+			return errors.New("Unexpected operand")
+		case cmapHexString:
+			srcCode = hexToUint64(v)
+		default:
+			return errors.New("Unexpected type")
+		}
+
+		// Target code.
+		o, err = cmap.parseObject()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		var toCode string
+
+		switch v := o.(type) {
+		case cmapOperand:
+			if v.Operand == endbfchar {
+				return nil
+			}
+			return errors.New("Unexpected operand")
+		case cmapHexString:
+			toCode = hexToString(v)
+		case cmapInt:
+			if v.val <= int64(0xF) {
+				toCode = "000"
+				toCode += fmt.Sprintf("%X", v.val)
+			} else if v.val <= int64(0xFF) {
+				toCode = "00"
+				toCode += fmt.Sprintf("%X", v.val)
+			} else if v.val <= int64(0xFFF) {
+				toCode = "0"
+				toCode += fmt.Sprintf("%X", v.val)
+			} else {
+				toCode = fmt.Sprintf("%X", v.val)
+			}
+		case cmapName:
+			toCode = "?"
+			/*if cmap.encoder != nil {
+				if r, found := cmap.encoder.GlyphToRune(v.Name); found {
+					toCode = string(r)
+				}
+			}*/
+		default:
+			return errors.New("Unexpected type")
+		}
+
+		cmap.codeMap[srcCode] = toCode
+	}
+
+	return nil
+}
+
 // parseBfchar parses a bfchar section of a CMap file.
 func (cmap *CMap) parseBfchar() error {
 	for {
@@ -332,6 +419,9 @@ func (cmap *CMap) parseBfchar() error {
 		case cmapInt:
 			if v.val <= int64(0xFF) {
 				toCode = "00"
+				toCode += fmt.Sprintf("%X", v.val)
+			} else if v.val <= int64(0xFFF) {
+				toCode = "0"
 				toCode += fmt.Sprintf("%X", v.val)
 			} else {
 				toCode = fmt.Sprintf("%X", v.val)
@@ -444,6 +534,124 @@ func (cmap *CMap) parseNotdefrange() error {
 	return nil
 }
 
+// parseCidrange parses a bfrange section of a CMap file.
+func (cmap *CMap) parseCidrange() error {
+	for {
+		// The specifications are in pairs of 3.
+		// <srcCodeFrom> <srcCodeTo> <target>
+		// where target can be either <destFrom> as a hex code, or a list.
+
+		// Src code from.
+		var srcCodeFrom uint64
+		{
+			o, err := cmap.parseObject()
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return err
+			}
+
+			switch v := o.(type) {
+			case cmapOperand:
+				if v.Operand == endcidrange {
+					return nil
+				}
+				return errors.New("Unexpected operand")
+			case cmapHexString:
+				srcCodeFrom = hexToUint64(v)
+			default:
+				return errors.New("Unexpected type")
+			}
+		}
+
+		// Src code to.
+		var srcCodeTo uint64
+		{
+			o, err := cmap.parseObject()
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return err
+			}
+
+			switch v := o.(type) {
+			case cmapOperand:
+				if v.Operand == endbfrange {
+					return nil
+				}
+				return errors.New("Unexpected operand")
+			case cmapHexString:
+				srcCodeTo = hexToUint64(v)
+			default:
+				return errors.New("Unexpected type")
+			}
+		}
+
+		// target(s).
+		o, err := cmap.parseObject()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+		switch v := o.(type) {
+		case cmapArray:
+			sc := srcCodeFrom
+			for _, o := range v.Array {
+				hexs, ok := o.(cmapHexString)
+				if !ok {
+					return errors.New("Non-hex string in array")
+				}
+				cmap.codeMap[sc] = hexToString(hexs)
+				sc++
+			}
+			if sc != srcCodeTo+1 {
+				return errors.New("Invalid number of items in array")
+			}
+		case cmapHexString:
+			// <srcCodeFrom> <srcCodeTo> <dstCode>, maps [from,to] to [dstCode,dstCode+to-from].
+			// in hex format.
+			target := hexToUint64(v)
+			i := uint64(0)
+			for sc := srcCodeFrom; sc <= srcCodeTo; sc++ {
+				r := target + i
+				cmap.codeMap[sc] = string(r)
+				i++
+			}
+		case cmapInt:
+			target := uint64(v.val)
+			i := uint64(0)
+			for sc := srcCodeFrom; sc <= srcCodeTo; sc++ {
+				r := target + i
+				if r <= 0xF {
+					hexTocode := "000"
+					hexTocode += fmt.Sprintf("%X", r)
+					cmap.codeMap[sc] = hexTocode
+				} else if r <= 0xFF {
+					hexTocode := "00"
+					hexTocode += fmt.Sprintf("%X", r)
+					cmap.codeMap[sc] = hexTocode
+				} else if r <= 0xFFF {
+					hexTocode := "0"
+					hexTocode += fmt.Sprintf("%X", r)
+					cmap.codeMap[sc] = hexTocode
+				} else {
+					cmap.codeMap[sc] = fmt.Sprintf("%X", r)
+				}
+				i++
+			}
+		default:
+			return errors.New("Unexpected type")
+		}
+	}
+
+	return nil
+}
+
 // parseBfrange parses a bfrange section of a CMap file.
 func (cmap *CMap) parseBfrange() error {
 	for {
@@ -539,6 +747,10 @@ func (cmap *CMap) parseBfrange() error {
 				r := target + i
 				if r <= 0xFF {
 					hexTocode := "00"
+					hexTocode += fmt.Sprintf("%X", r)
+					cmap.codeMap[sc] = hexTocode
+				} else if r <= 0xFFF {
+					hexTocode := "0"
 					hexTocode += fmt.Sprintf("%X", r)
 					cmap.codeMap[sc] = hexTocode
 				} else {
