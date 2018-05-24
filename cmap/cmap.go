@@ -373,7 +373,7 @@ func (cmap *CMap) parseNotdefrange() error {
 
 			switch v := o.(type) {
 			case cmapOperand:
-				if v.Operand == endbfrange {
+				if v.Operand == endnotdefrange {
 					return nil
 				}
 				return errors.New("Unexpected operand")
