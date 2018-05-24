@@ -237,7 +237,8 @@ func (parser *PdfParser) ParseIndirectObject() (PdfObject, error) {
 				}
 				common.Log.Trace("should read 5, actual read: %d", n)
 				if string(bb[:5]) == "tream" {
-					parser.skipSpaces()
+					//it will skip the real byte when use skipspaces() and it will cause decrypt or decode fail
+					parser.reader.ReadString('\n')
 					dict, ok := indirect.PdfObject.(*PdfObjectDictionary)
 					if !ok {
 						return nil, errors.New("Stream object missing dictionary")
@@ -261,11 +262,13 @@ func (parser *PdfParser) ParseIndirectObject() (PdfObject, error) {
 						return nil, errors.New("Stream needs to be longer than 0")
 					}
 
+					//TODO: we can delete the logic for effective
 					// Validate the stream length based on the cross references.
 					// Find next object with closest offset to current object and calculate
 					// the expected stream length based on that.
 					streamStartOffset := parser.GetFileOffset()
 					nextObjectOffset := parser.xrefNextObjectOffset(streamStartOffset)
+
 					if streamStartOffset+int64(streamLength) > nextObjectOffset && nextObjectOffset > streamStartOffset {
 						common.Log.Debug("Expected ending at %d", streamStartOffset+int64(streamLength))
 						common.Log.Debug("Next object starting at %d", nextObjectOffset)
