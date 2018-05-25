@@ -241,8 +241,9 @@ func (this *PdfReader) getFontEncoding(font *Font) error {
 				font.mSimpleEncodingTable = v
 			} else {
 				if unicodeName, ok := mPdfCidToUnicode[font.mFontEncoding]; ok {
-					font.mPredefinedCmap = true
-					this.parsePredefinedCMap(font, unicodeName)
+					if err := this.parsePredefinedCMap(font, unicodeName); err == nil {
+						font.mPredefinedCmap = true
+					}
 				}
 			}
 		}
@@ -349,7 +350,9 @@ func (this *PdfReader) getFontInfo(font *Font) error {
 						font.mFontEncoding = registerOrderingSupple
 						unicodeName := registerOrdering + "-UCS2"
 						if !font.mPredefinedCmap {
-							this.parsePredefinedCMap(font, unicodeName)
+							if err := this.parsePredefinedCMap(font, unicodeName); err == nil {
+								font.mPredefinedCmap = true
+							}
 						}
 					}
 				}

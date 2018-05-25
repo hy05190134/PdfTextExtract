@@ -38,14 +38,51 @@ func (e *Extractor) ExtractText() (string, error) {
 	inText := false
 	xPos, yPos := float64(-1), float64(-1)
 
+	preRect0, preRect1, preRect2, preRect3 := float64(-1), float64(-1), float64(-1), float64(-1)
+	rect0, rect1, rect2, rect3 := float64(-1), float64(-1), float64(-1), float64(-1)
+
 	processor.AddHandler(contentstream.HandlerConditionEnumAllOperands, "",
 		func(op *contentstream.ContentStreamOperation, f model.FontsByNames) error {
 			operand := op.Operand
 			switch operand {
+			case "re":
+				if inText {
+					common.Log.Debug("re operand outside text")
+					return nil
+				}
+				if len(op.Params) != 4 {
+					common.Log.Debug("Error re should only get 4 input params, got %d", len(op.Params))
+					return errors.New("Incorrect parameter count")
+				}
+
+				rect0, err = core.GetNumberAsFloat(op.Params[0])
+				if err != nil {
+					common.Log.Debug("re Float parse error")
+					return nil
+				}
+				rect1, err = core.GetNumberAsFloat(op.Params[1])
+				if err != nil {
+					common.Log.Debug("re Float parse error")
+					return nil
+				}
+				rect2, err = core.GetNumberAsFloat(op.Params[2])
+				if err != nil {
+					common.Log.Debug("re Float parse error")
+					return nil
+				}
+				rect3, err = core.GetNumberAsFloat(op.Params[3])
+				if err != nil {
+					common.Log.Debug("re Float parse error")
+					return nil
+				}
 			case "BT":
 				inText = true
 			case "ET":
 				inText = false
+				preRect0 = rect0
+				preRect1 = rect1
+				preRect2 = rect2
+				preRect3 = rect3
 			case "Tf":
 				if !inText {
 					common.Log.Debug("Tf operand outside text")
@@ -97,7 +134,7 @@ func (e *Extractor) ExtractText() (string, error) {
 				}
 
 				//first change charcode to cid string
-				if font != nil && font.GetmPredefinedCmap() {
+				if font != nil && font.GetmPredefinedCmap() && cidCodemap != nil {
 					str := cidCodemap.CharcodeBytesToCidStr([]byte(*param))
 					param = core.MakeString(str)
 				}
@@ -134,7 +171,7 @@ func (e *Extractor) ExtractText() (string, error) {
 				}
 
 				//first change charcode to cid string
-				if font != nil && font.GetmPredefinedCmap() {
+				if font != nil && font.GetmPredefinedCmap() && cidCodemap != nil {
 					str := cidCodemap.CharcodeBytesToCidStr([]byte(*param))
 					param = core.MakeString(str)
 				}
@@ -182,7 +219,7 @@ func (e *Extractor) ExtractText() (string, error) {
 				}
 				if ty < 0 {
 					// TODO: More flexible space characters?
-					//buf.WriteString("\n")
+					buf.WriteString("\n")
 				}
 			case "Tm":
 				if !inText {
@@ -215,7 +252,9 @@ func (e *Extractor) ExtractText() (string, error) {
 				if yPos == -1 {
 					yPos = float64(*yfloat)
 				} else if yPos > float64(*yfloat) {
-					buf.WriteString("\n")
+					if rect0 != preRect0 || rect1 != preRect1 || rect2 != preRect2 || rect3 != preRect3 {
+						buf.WriteString("\n")
+					}
 					xPos = float64(*xfloat)
 					yPos = float64(*yfloat)
 					return nil
@@ -245,7 +284,7 @@ func (e *Extractor) ExtractText() (string, error) {
 					switch v := obj.(type) {
 					case *core.PdfObjectString:
 						//first change charcode to cid string
-						if font != nil && font.GetmPredefinedCmap() {
+						if font != nil && font.GetmPredefinedCmap() && cidCodemap != nil {
 							str := cidCodemap.CharcodeBytesToCidStr([]byte(*v))
 							v = core.MakeString(str)
 						}
@@ -295,7 +334,7 @@ func (e *Extractor) ExtractText() (string, error) {
 				}
 
 				//first change charcode to cid string
-				if font != nil && font.GetmPredefinedCmap() {
+				if font != nil && font.GetmPredefinedCmap() && cidCodemap != nil {
 					str := cidCodemap.CharcodeBytesToCidStr([]byte(*param))
 					param = core.MakeString(str)
 				}
