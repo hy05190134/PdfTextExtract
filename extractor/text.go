@@ -117,14 +117,18 @@ func (e *Extractor) ExtractText() (string, error) {
 					common.Log.Debug("T* operand outside text")
 					return nil
 				}
-				buf.WriteString("\n")
+				if rect0 != preRect0 || rect1 != preRect1 || rect2 != preRect2 || rect3 != preRect3 {
+					buf.WriteString("\n")
+				}
 			case "'":
 				//quote = T* + Tj
 				if !inText {
 					common.Log.Debug("quote operand outside text")
 					return nil
 				}
-				buf.WriteString("\n")
+				if rect0 != preRect0 || rect1 != preRect1 || rect2 != preRect2 || rect3 != preRect3 {
+					buf.WriteString("\n")
+				}
 				if len(op.Params) < 1 {
 					return nil
 				}
@@ -161,7 +165,9 @@ func (e *Extractor) ExtractText() (string, error) {
 					common.Log.Debug("double quote operand outside text")
 					return nil
 				}
-				buf.WriteString("\n")
+				if rect0 != preRect0 || rect1 != preRect1 || rect2 != preRect2 || rect3 != preRect3 {
+					buf.WriteString("\n")
+				}
 				if len(op.Params) < 1 {
 					return nil
 				}
@@ -219,7 +225,9 @@ func (e *Extractor) ExtractText() (string, error) {
 				}
 				if ty < 0 {
 					// TODO: More flexible space characters?
-					buf.WriteString("\n")
+					if rect0 != preRect0 || rect1 != preRect1 || rect2 != preRect2 || rect3 != preRect3 {
+						buf.WriteString("\n")
+					}
 				}
 			case "Tm":
 				if !inText {
