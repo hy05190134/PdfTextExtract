@@ -598,6 +598,21 @@ func (parser *PdfParser) readXrefTable(prevLine string) error {
 	for {
 		line, err := parser.reader.ReadString('\n')
 		if err != nil {
+			//%%EOF exist the same line with trailer
+			if err == io.EOF {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "trailer") {
+					common.Log.Trace("found trailer, %s", line)
+					// sometimes get "trailer<<"
+					if len(line) > 9 {
+						offset := parser.GetFileOffset()
+						parser.SetFileOffset(offset - int64(len(line)) + 6)
+					}
+
+					parser.skipSpaces()
+					break
+				}
+			}
 			return err
 		}
 
