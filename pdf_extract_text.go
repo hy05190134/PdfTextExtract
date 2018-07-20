@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"runtime"
+	//"runtime"
 	"strings"
 )
 
@@ -29,10 +29,12 @@ func main() {
 
 	inputPath := os.Args[1]
 
-	m := new(runtime.MemStats)
-	runtime.GC()
-	runtime.ReadMemStats(m)
-	fmt.Printf("before load, heap memory: %d, head in use: %d\n", m.HeapAlloc, m.HeapInuse)
+	/*
+		    m := new(runtime.MemStats)
+			runtime.GC()
+			runtime.ReadMemStats(m)
+			fmt.Printf("before load, heap memory: %d, head in use: %d\n", m.HeapAlloc, m.HeapInuse)
+	*/
 	text, err := ExtractPdfFile(inputPath)
 	if err != nil {
 		fmt.Printf("Error: %s\n", err)
@@ -56,9 +58,16 @@ func main() {
 	}
 
 	fmt.Println(text)
-	runtime.GC()
-	runtime.ReadMemStats(m)
-	fmt.Printf("after load, heap memory: %d, head in use: %d\n", m.HeapAlloc, m.HeapInuse)
+	/*
+		runtime.GC()
+		runtime.ReadMemStats(m)
+		fmt.Printf("after load, heap memory: %d, head in use: %d\n", m.HeapAlloc, m.HeapInuse)
+	*/
+}
+
+type ContentPair struct {
+	s     *PdfObjectStream
+	index int
 }
 
 func parseText(this *pdf.PdfReader) (string, error) {
@@ -67,39 +76,47 @@ func parseText(this *pdf.PdfReader) (string, error) {
 	parser := this.GetParser()
 	mFontsForPages := this.GetFontsForPages()
 
-	for i := 0; i < len(pageList); i++ {
-		var contentList []*PdfObjectStream
-		if pageObjDict, ok := pageList[i].PdfObject.(*PdfObjectDictionary); ok {
-			if contentsArray, ok := pageObjDict.Get("Contents").(*PdfObjectArray); ok {
-				for j := 0; j < len(*contentsArray); j++ {
-					contentObj, err := parser.Trace((*contentsArray)[j])
-					if err != nil {
-						common.Log.Debug("Error: trace content to obj failed, err: %s", err)
-						continue
+	contentStreamChan := make(chan ContentPair, 10)
+
+	go func() {
+		for i := 0; i < len(pageList); i++ {
+			if pageObjDict, ok := pageList[i].PdfObject.(*PdfObjectDictionary); ok {
+				if contentsArray, ok := pageObjDict.Get("Contents").(*PdfObjectArray); ok {
+					for j := 0; j < len(*contentsArray); j++ {
+						contentObj, err := parser.Trace((*contentsArray)[j])
+						if err != nil {
+							common.Log.Debug("Error: trace content to obj failed, err: %s", err)
+							continue
+						}
+						if contentStmObj, ok := contentObj.(*PdfObjectStream); ok {
+							contentStreamChan <- ContentPair{contentStmObj, i}
+						}
 					}
+				} else if contentObj, err := parser.Trace(pageObjDict.Get("Contents")); err == nil {
 					if contentStmObj, ok := contentObj.(*PdfObjectStream); ok {
-						contentList = append(contentList, contentStmObj)
+						contentStreamChan <- ContentPair{contentStmObj, i}
 					}
-				}
-			} else if contentObj, err := parser.Trace(pageObjDict.Get("Contents")); err == nil {
-				if contentStmObj, ok := contentObj.(*PdfObjectStream); ok {
-					contentList = append(contentList, contentStmObj)
 				}
 			}
 		}
+		close(contentStreamChan)
+	}()
 
-		for j := 0; j < len(contentList); j++ {
-			streamData, err := DecodeStream(contentList[j])
+	for {
+		if pair, ok := <-contentStreamChan; ok {
+			streamData, err := DecodeStream(pair.s)
 			if err != nil {
 				return "", err
 			}
 
-			//common.Log.Debug("stream data: %s", streamData)
+			common.Log.Trace("stream data: %s", streamData)
 
-			e := New(string(streamData), mFontsForPages[i])
+			e := New(string(streamData), mFontsForPages[pair.index])
 			s, _ := e.ExtractText()
 			text += s
 			text += "\n\n"
+		} else {
+			break
 		}
 	}
 

@@ -82,11 +82,9 @@ func (parser *PdfParser) lookupObjectViaOS(sobjNumber int, objNum int) (PdfObjec
 			return nil, errors.New("Invalid object stream")
 		}
 
-		/*
-			if parser.crypter != nil && !parser.crypter.isDecrypted(so) {
-				return nil, errors.New("Need to decrypt the stream")
-			}
-		*/
+		if parser.crypter != nil && !parser.crypter.isDecrypted(so) {
+			return nil, errors.New("Need to decrypt the stream")
+		}
 
 		sod := so.PdfObjectDictionary
 		common.Log.Trace("so d: %s\n", *sod)
@@ -212,14 +210,13 @@ func (parser *PdfParser) lookupByNumberWrapper(objNumber int, attemptRepairs boo
 
 	// If encrypted, decrypt it prior to returning.
 	// Do not attempt to decrypt objects within object streams.
-	/*
-		    if !inObjStream && parser.crypter != nil && !parser.crypter.isDecrypted(obj) {
-				err := parser.crypter.Decrypt(obj, 0, 0)
-				if err != nil {
-					return nil, inObjStream, err
-				}
-			}
-	*/
+
+	if !inObjStream && parser.crypter != nil && !parser.crypter.isDecrypted(obj) {
+		err := parser.crypter.Decrypt(obj, 0, 0)
+		if err != nil {
+			return nil, inObjStream, err
+		}
+	}
 
 	return obj, inObjStream, nil
 }
@@ -241,6 +238,9 @@ func (parser *PdfParser) lookupByNumber(objNumber int, attemptRepairs bool) (Pdf
 	if ok {
 		common.Log.Trace("Returning cached object %d", objNumber)
 		return obj, false, nil
+	} else {
+		bakOffset := parser.GetFileOffset()
+		defer func() { parser.SetFileOffset(bakOffset) }()
 	}
 
 	xref, ok := parser.xrefs[objNumber]
@@ -322,13 +322,12 @@ func (parser *PdfParser) lookupByNumber(objNumber int, attemptRepairs bool) (Pdf
 			}
 			common.Log.Trace("<Loaded via OS")
 			parser.ObjCache[objNumber] = optr
-			/*
-				            if parser.crypter != nil {
-								// Mark as decrypted (inside object stream) for caching.
-								// and avoid decrypting decrypted object.
-								parser.crypter.DecryptedObjects[optr] = true
-							}
-			*/
+
+			if parser.crypter != nil {
+				// Mark as decrypted (inside object stream) for caching.
+				// and avoid decrypting decrypted object.
+				parser.crypter.DecryptedObjects[optr] = true
+			}
 			return optr, true, nil
 		} else {
 			common.Log.Debug("?? Belongs to a non-cross referenced object ...!")
@@ -352,9 +351,6 @@ func (parser *PdfParser) Trace(obj PdfObject) (PdfObject, error) {
 		// Direct object already.
 		return obj, nil
 	}
-
-	bakOffset := parser.GetFileOffset()
-	defer func() { parser.SetFileOffset(bakOffset) }()
 
 	o, err := parser.LookupByReference(*ref)
 	if err != nil {

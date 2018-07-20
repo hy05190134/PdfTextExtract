@@ -45,6 +45,8 @@ type PdfParser struct {
 	//info dict
 	infoDict *PdfObjectDictionary
 
+	crypter *PdfCrypt
+
 	// Tracker for reference lookups when looking up Length entry of stream objects.
 	// The Length entries of stream objects are a special case, as they can require recursive parsing, i.e. look up
 	// the length reference (if not object) prior to reading the actual stream.  This has risks of endless looping.
@@ -235,7 +237,8 @@ func (parser *PdfParser) ParseIndirectObject() (PdfObject, error) {
 				}
 				common.Log.Trace("should read 5, actual read: %d", n)
 				if string(bb[:5]) == "tream" {
-					parser.skipSpaces()
+					//it will skip the real byte when use skipspaces() and it will cause decrypt or decode fail
+					parser.reader.ReadString('\n')
 					dict, ok := indirect.PdfObject.(*PdfObjectDictionary)
 					if !ok {
 						return nil, errors.New("Stream object missing dictionary")
@@ -259,11 +262,13 @@ func (parser *PdfParser) ParseIndirectObject() (PdfObject, error) {
 						return nil, errors.New("Stream needs to be longer than 0")
 					}
 
+					//TODO: we can delete the logic for effective
 					// Validate the stream length based on the cross references.
 					// Find next object with closest offset to current object and calculate
 					// the expected stream length based on that.
 					streamStartOffset := parser.GetFileOffset()
 					nextObjectOffset := parser.xrefNextObjectOffset(streamStartOffset)
+
 					if streamStartOffset+int64(streamLength) > nextObjectOffset && nextObjectOffset > streamStartOffset {
 						common.Log.Debug("Expected ending at %d", streamStartOffset+int64(streamLength))
 						common.Log.Debug("Next object starting at %d", nextObjectOffset)
@@ -542,78 +547,148 @@ func (parser *PdfParser) readXrefStream(xs *PdfObjectStream) error {
 }
 
 // read xref table
-func (parser *PdfParser) readXrefTable() error {
+func (parser *PdfParser) readXrefTable(prevLine string) error {
 	curObjIdx := -1
 	objCount := 0
 	insideSubsection := false
 
+	//ref^M34 45 ^M111 000 n
+	if len(prevLine) > 3 {
+		splitStrs := strings.Split(prevLine, "\r")
+		for _, s := range splitStrs {
+			s = strings.TrimSpace(s)
+			result1 := reXrefSubsection.FindStringSubmatch(s)
+			if len(result1) == 3 {
+				// Match
+				first, _ := strconv.Atoi(result1[1])
+				second, _ := strconv.Atoi(result1[2])
+				curObjIdx = first
+				objCount = second
+				insideSubsection = true
+				common.Log.Trace("xref subsection: first object: %d objects: %d", curObjIdx, objCount)
+				continue
+			}
+
+			result2 := reXrefEntry.FindStringSubmatch(s)
+			if len(result2) == 4 {
+				if !insideSubsection {
+					common.Log.Debug("Error: Xref invalid format!")
+					return errors.New("Xref invalid format")
+				}
+
+				first, _ := strconv.ParseInt(result2[1], 10, 64)
+				gen, _ := strconv.Atoi(result2[2])
+				third := result2[3]
+
+				if strings.ToLower(third) == "n" && first > 1 {
+					if x, ok := parser.xrefs[curObjIdx]; !ok || gen > x.generation {
+						obj := XrefObject{
+							objectNumber: curObjIdx,
+							xtype:        XREF_TABLE_ENTRY,
+							offset:       first,
+							generation:   gen}
+						parser.xrefs[curObjIdx] = obj
+					}
+				}
+				curObjIdx++
+			}
+		}
+	}
+
 	for {
 		line, err := parser.reader.ReadString('\n')
 		if err != nil {
+			//%%EOF exist the same line with trailer
+			if err == io.EOF {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "trailer") {
+					common.Log.Trace("found trailer, %s", line)
+					// sometimes get "trailer<<"
+					if len(line) > 9 {
+						offset := parser.GetFileOffset()
+						parser.SetFileOffset(offset - int64(len(line)) + 6)
+					}
+
+					parser.skipSpaces()
+					break
+				}
+			}
 			return err
 		}
-		line = strings.TrimSpace(line)
 
+		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "trailer") {
 			common.Log.Trace("found trailer, %s", line)
+			// sometimes get "trailer<<"
+			if len(line) > 9 {
+				offset := parser.GetFileOffset()
+				parser.SetFileOffset(offset - int64(len(line)) + 6)
+			}
+
+			parser.skipSpaces()
 			break
 		}
 
-		result1 := reXrefSubsection.FindStringSubmatch(line)
-		if len(result1) == 3 {
-			// Match
-			first, _ := strconv.Atoi(result1[1])
-			second, _ := strconv.Atoi(result1[2])
-			curObjIdx = first
-			objCount = second
-			insideSubsection = true
-			common.Log.Trace("xref subsection: first object: %d objects: %d", curObjIdx, objCount)
-			continue
-		}
-
-		result2 := reXrefEntry.FindStringSubmatch(line)
-		if len(result2) == 4 {
-			if !insideSubsection {
-				common.Log.Debug("Error: Xref invalid format!")
-				return errors.New("Xref invalid format")
+		//like 34 56^M110000 000 n
+		splitStrs := strings.Split(line, "\r")
+		for _, s := range splitStrs {
+			s = strings.TrimSpace(s)
+			result1 := reXrefSubsection.FindStringSubmatch(s)
+			if len(result1) == 3 {
+				// Match
+				first, _ := strconv.Atoi(result1[1])
+				second, _ := strconv.Atoi(result1[2])
+				curObjIdx = first
+				objCount = second
+				insideSubsection = true
+				common.Log.Trace("xref subsection: first object: %d objects: %d", curObjIdx, objCount)
+				continue
 			}
 
-			first, _ := strconv.ParseInt(result2[1], 10, 64)
-			gen, _ := strconv.Atoi(result2[2])
-			third := result2[3]
-
-			if strings.ToLower(third) == "n" && first > 1 {
-				// Object in use in the file!  Load it.
-				// Ignore free objects ('f').
-				//
-				// Some malformed writers mark the offset as 0 to
-				// indicate that the object is free, and still mark as 'n'
-				// Fairly safe to assume is free if offset is 0.
-				//
-				// Some malformed writers even seem to have values such as
-				// 1.. Assume null object for those also. That is referring
-				// to within the PDF version in the header clearly.
-				//
-				// Load if not existing or higher generation number than previous.
-				// Usually should not happen, lower generation numbers
-				// would be marked as free.  But can still happen!
-				if x, ok := parser.xrefs[curObjIdx]; !ok || gen > x.generation {
-					obj := XrefObject{
-						objectNumber: curObjIdx,
-						xtype:        XREF_TABLE_ENTRY,
-						offset:       first,
-						generation:   gen}
-					parser.xrefs[curObjIdx] = obj
+			result2 := reXrefEntry.FindStringSubmatch(s)
+			if len(result2) == 4 {
+				if !insideSubsection {
+					common.Log.Debug("Error: Xref invalid format!")
+					return errors.New("Xref invalid format")
 				}
+
+				first, _ := strconv.ParseInt(result2[1], 10, 64)
+				gen, _ := strconv.Atoi(result2[2])
+				third := result2[3]
+
+				if strings.ToLower(third) == "n" && first > 1 {
+					// Object in use in the file!  Load it.
+					// Ignore free objects ('f').
+					//
+					// Some malformed writers mark the offset as 0 to
+					// indicate that the object is free, and still mark as 'n'
+					// Fairly safe to assume is free if offset is 0.
+					//
+					// Some malformed writers even seem to have values such as
+					// 1.. Assume null object for those also. That is referring
+					// to within the PDF version in the header clearly.
+					//
+					// Load if not existing or higher generation number than previous.
+					// Usually should not happen, lower generation numbers
+					// would be marked as free.  But can still happen!
+					if x, ok := parser.xrefs[curObjIdx]; !ok || gen > x.generation {
+						obj := XrefObject{
+							objectNumber: curObjIdx,
+							xtype:        XREF_TABLE_ENTRY,
+							offset:       first,
+							generation:   gen}
+						parser.xrefs[curObjIdx] = obj
+					}
+				}
+
+				curObjIdx++
+				continue
 			}
 
-			curObjIdx++
-			continue
-		}
-
-		if strings.Compare(line, "%%EOF") == 0 {
-			common.Log.Debug("ERROR: end of file - trailer not found - error!")
-			return errors.New("End of file - trailer not found")
+			if strings.Compare(s, "%%EOF") == 0 {
+				common.Log.Debug("ERROR: end of file - trailer not found - error!")
+				return errors.New("End of file - trailer not found")
+			}
 		}
 	}
 
@@ -1172,6 +1247,76 @@ func (parser *PdfParser) parsePdfVersion() (int, int, error) {
 	return int(majorVersion), int(minorVersion), nil
 }
 
+// IsEncrypted checks if the document is encrypted. A bool flag is returned indicating the result.
+// First time when called, will check if the Encrypt dictionary is accessible through the trailer dictionary.
+// If encrypted, prepares a crypt datastructure which can be used to authenticate and decrypt the document.
+// On failure, an error is returned.
+func (parser *PdfParser) IsEncrypted() (bool, error) {
+	if parser.crypter != nil {
+		return true, nil
+	}
+
+	if parser.trailerDict != nil {
+		common.Log.Trace("Checking encryption dictionary!")
+		encDictRef, isEncrypted := parser.trailerDict.Get("Encrypt").(*PdfObjectReference)
+		if isEncrypted {
+			common.Log.Trace("Is encrypted!")
+			common.Log.Trace("0: Look up ref %q", encDictRef)
+			encObj, err := parser.LookupByReference(*encDictRef)
+			common.Log.Trace("1: %q", encObj)
+			if err != nil {
+				return false, err
+			}
+
+			encIndObj, ok := encObj.(*PdfIndirectObject)
+			if !ok {
+				common.Log.Debug("Encryption object not an indirect object")
+				return false, errors.New("Type check error")
+			}
+			encDict, ok := encIndObj.PdfObject.(*PdfObjectDictionary)
+
+			common.Log.Trace("2: %q", encDict)
+			if !ok {
+				return false, errors.New("Trailer Encrypt object non dictionary")
+			}
+			crypter, err := PdfCryptMakeNew(parser, encDict, parser.trailerDict)
+			if err != nil {
+				return false, err
+			}
+
+			parser.crypter = &crypter
+			common.Log.Trace("Crypter object %b", crypter)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// Decrypt attempts to decrypt the PDF file with a specified password.  Also tries to
+// decrypt with an empty password.  Returns true if successful, false otherwise.
+// An error is returned when there is a problem with decrypting.
+func (parser *PdfParser) Decrypt(password []byte) (bool, error) {
+	// Also build the encryption/decryption key.
+	if parser.crypter == nil {
+		return false, errors.New("Check encryption first")
+	}
+
+	authenticated, err := parser.crypter.authenticate(password)
+	if err != nil {
+		return false, err
+	}
+
+	if !authenticated {
+		authenticated, err = parser.crypter.authenticate([]byte(""))
+	}
+
+	return authenticated, err
+}
+
+func (parser *PdfParser) IsAuthenticated() bool {
+	return parser.crypter.Authenticated
+}
+
 // NewParser creates a new parser for a PDF file via ReadSeeker. Loads the cross reference stream and trailer.
 // An error is returned on failure.
 func NewParser(rs io.ReadSeeker) (*PdfParser, error) {
@@ -1207,6 +1352,10 @@ func NewParser(rs io.ReadSeeker) (*PdfParser, error) {
 
 func (parser *PdfParser) GetRootDict() *PdfObjectDictionary {
 	return parser.rootDict
+}
+
+func (parser *PdfParser) GetCrypter() *PdfCrypt {
+	return parser.crypter
 }
 
 // GetTrailer returns the PDFs trailer dictionary. The trailer dictionary is typically the starting point for a PDF,
@@ -1270,13 +1419,14 @@ func (parser *PdfParser) readReferenceData() error {
 			// read first line
 			line, err := parser.reader.ReadString('\n')
 			line = strings.TrimSpace(line)
+
 			if len(line) < 3 || !strings.HasPrefix(line, "ref") {
 				common.Log.Debug("Error: invalid xref keyword")
 				return errors.New("Invalid xref keyword")
 			}
 
 			//parse xref table
-			if err := parser.readXrefTable(); err != nil {
+			if err := parser.readXrefTable(line); err != nil {
 				common.Log.Debug("Error: parse xref table failed, err: %v", err)
 				return err
 			}
@@ -1288,11 +1438,13 @@ func (parser *PdfParser) readReferenceData() error {
 				return err
 			}
 
-			parser.trailerDict = dict
+			if parser.trailerDict == nil {
+				parser.trailerDict = dict
+			}
 
 			//get root dict
 			if !parser.getRoot {
-				rootObj, err := parser.Trace(parser.trailerDict.Get("Root"))
+				rootObj, err := parser.Trace(dict.Get("Root"))
 				if err != nil {
 					common.Log.Debug("Error: failed to load root element, err: %s", err)
 					return err
@@ -1304,11 +1456,13 @@ func (parser *PdfParser) readReferenceData() error {
 				} else {
 					parser.getRoot = true
 					parser.rootDict = rootDict
+					//upate the trailerDict who has root
+					parser.trailerDict = dict
 				}
 			}
 
 			// Check the XrefStm object also from the trailer.
-			if xrefStm := parser.trailerDict.Get("XRefStm"); xrefStm != nil {
+			if xrefStm := dict.Get("XRefStm"); xrefStm != nil {
 				xrefStmObj, ok := xrefStm.(*PdfObjectInteger)
 				if !ok {
 					return errors.New("XRefStm != int")
@@ -1316,7 +1470,7 @@ func (parser *PdfParser) readReferenceData() error {
 					xrefOffset = int64(*xrefStmObj)
 					backward_compatibility = true
 				}
-			} else if xrefPrev := parser.trailerDict.Get("Prev"); xrefPrev != nil {
+			} else if xrefPrev := dict.Get("Prev"); xrefPrev != nil {
 				xrefPrevObj, ok := xrefPrev.(*PdfObjectInteger)
 				if !ok {
 					common.Log.Debug("Invalid Prev reference: Not a *PdfObjectInteger (%T)", xrefPrevObj)
@@ -1359,7 +1513,6 @@ func (parser *PdfParser) readReferenceData() error {
 					xrefPrevObj, ok := prev.(*PdfObjectInteger)
 					if !ok {
 						common.Log.Debug("Invalid Prev reference: Not a *PdfObjectInteger (%T)", xrefPrevObj)
-						parser.trailerDict = xs.PdfObjectDictionary
 						return nil
 					} else {
 						xrefOffset = int64(*xrefPrevObj)
@@ -1370,15 +1523,12 @@ func (parser *PdfParser) readReferenceData() error {
 					xrefPrevObj, ok := prev.(*PdfObjectInteger)
 					if !ok {
 						common.Log.Debug("Invalid Prev reference: Not a *PdfObjectInteger (%T)", xrefPrevObj)
-						parser.trailerDict = xs.PdfObjectDictionary
 						return nil
 					} else {
 						xrefOffset = int64(*xrefPrevObj)
 					}
 				}
 			}
-
-			parser.trailerDict = xs.PdfObjectDictionary
 
 			//parse xref table
 			if err := parser.readXrefStream(xs); err != nil {
@@ -1400,6 +1550,8 @@ func (parser *PdfParser) readReferenceData() error {
 				} else {
 					parser.getRoot = true
 					parser.rootDict = rootDict
+					// update trailer who has root
+					parser.trailerDict = xs.PdfObjectDictionary
 				}
 			}
 

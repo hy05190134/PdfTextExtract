@@ -10,6 +10,7 @@ import (
 	"../common"
 	. "../core"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"strconv"
@@ -159,6 +160,7 @@ func (this *PdfReader) parsePredefinedCMap(font *Font, unicodeName string) error
 		common.Log.Debug("read file %s failed, %s", cmapToCidFilename, err)
 		return err
 	}
+
 	//common.Log.Debug("charcode_to_cid data: %s\n\n", streamData)
 
 	mCmap, err := cmap.LoadCmapFromData(streamData)
@@ -184,6 +186,17 @@ func (this *PdfReader) parsePredefinedCMap(font *Font, unicodeName string) error
 		return err
 	}
 	font.mCmap = mCmap
+
+	/*
+		    for k, v := range font.mToCidCmap.GetCodeMap() {
+				common.Log.Debug("chartocid, %d: %s", k, v)
+			}
+
+			for k, v := range font.mCmap.GetCodeMap() {
+				common.Log.Debug("cidtounicode, %d, %s", k, v)
+			}
+	*/
+
 	return nil
 }
 
@@ -228,8 +241,9 @@ func (this *PdfReader) getFontEncoding(font *Font) error {
 				font.mSimpleEncodingTable = v
 			} else {
 				if unicodeName, ok := mPdfCidToUnicode[font.mFontEncoding]; ok {
-					font.mPredefinedCmap = true
-					this.parsePredefinedCMap(font, unicodeName)
+					if err := this.parsePredefinedCMap(font, unicodeName); err == nil {
+						font.mPredefinedCmap = true
+					}
 				}
 			}
 		}
@@ -322,7 +336,7 @@ func (this *PdfReader) getFontInfo(font *Font) error {
 			}
 
 			if descendantFontDict, ok := descendantFontObj.(*PdfObjectDictionary); ok {
-				//handle Adobe-GB1, Adobe-CNS1, Adobe-Japan1, Adobe-Korea1
+				//handle Adobe-GB1, Adobe-CNS1, Adobe-Japan1, Adobe-Korea1 && other have handle
 				if fontSystemInfo, ok := descendantFontDict.Get("CIDSystemInfo").(*PdfObjectDictionary); ok {
 					register := fontSystemInfo.Get("Registry").(*PdfObjectString)
 					ordering := fontSystemInfo.Get("Ordering").(*PdfObjectString)
@@ -335,7 +349,11 @@ func (this *PdfReader) getFontInfo(font *Font) error {
 						registerOrdering == "Adobe-Japan1" || registerOrdering == "Adobe-Korea1" {
 						font.mFontEncoding = registerOrderingSupple
 						unicodeName := registerOrdering + "-UCS2"
-						this.parsePredefinedCMap(font, unicodeName)
+						if !font.mPredefinedCmap {
+							if err := this.parsePredefinedCMap(font, unicodeName); err == nil {
+								font.mPredefinedCmap = true
+							}
+						}
 					}
 				}
 
@@ -509,6 +527,22 @@ func NewPdfReader(rs io.ReadSeeker) (*PdfReader, error) {
 	}
 	pdfReader.parser = parser
 
+	isEncrypted, err := pdfReader.parser.IsEncrypted()
+	if err != nil {
+		return nil, err
+	}
+
+	common.Log.Trace("this pdf encrypt: %v", isEncrypted)
+	if isEncrypted {
+		common.Log.Trace("encrypt info: %s", pdfReader.GetEncryptionMethod())
+		if success, err := parser.Decrypt([]byte("")); err != nil {
+			common.Log.Debug("error: decrypt failed, err: %s", err)
+			return nil, err
+		} else if !success {
+			return nil, errors.New("decrypt use empty password failed")
+		}
+	}
+
 	err = pdfReader.loadStructure()
 	if err != nil {
 		return nil, err
@@ -597,6 +631,10 @@ func (this *PdfReader) ParseFonts() error {
 
 // Loads the structure of the pdf file: pages, outlines, etc.
 func (this *PdfReader) loadStructure() error {
+	if this.parser.GetCrypter() != nil && !this.parser.IsAuthenticated() {
+		return errors.New("file need to be decrypted first")
+	}
+
 	// Pages.
 	pagesRef, ok := this.parser.GetRootDict().Get("Pages").(*PdfObjectReference)
 	if !ok {
@@ -755,6 +793,36 @@ func (this *PdfReader) buildPageList(node *PdfIndirectObject, parent *PdfIndirec
 	}
 
 	return nil
+}
+
+// Returns a string containing some information about the encryption method used.
+// Subject to changes.  May be better to return a standardized struct with information.
+// But challenging due to the many different types supported.
+func (this *PdfReader) GetEncryptionMethod() string {
+	crypter := this.parser.GetCrypter()
+	str := crypter.Filter + " - "
+
+	if crypter.V == 0 {
+		str += "Undocumented algorithm"
+	} else if crypter.V == 1 {
+		// RC4 or AES (bits: 40)
+		str += "RC4: 40 bits"
+	} else if crypter.V == 2 {
+		str += fmt.Sprintf("RC4: %d bits", crypter.Length)
+	} else if crypter.V == 3 {
+		str += "Unpublished algorithm"
+	} else if crypter.V == 4 {
+		// Look at CF, StmF, StrF
+		str += fmt.Sprintf("Stream filter: %s - String filter: %s", crypter.StreamFilter, crypter.StringFilter)
+		str += "; Crypt filters:"
+		for name, cf := range crypter.CryptFilters {
+			str += fmt.Sprintf(" - %s: %s (%d)", name, cf.Cfm, cf.Length)
+		}
+	}
+	perms := crypter.GetAccessPermissions()
+	str += fmt.Sprintf(" - %#v", perms)
+
+	return str
 }
 
 func (this *PdfReader) GetPageList() []*PdfIndirectObject {
