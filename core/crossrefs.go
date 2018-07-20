@@ -238,6 +238,9 @@ func (parser *PdfParser) lookupByNumber(objNumber int, attemptRepairs bool) (Pdf
 	if ok {
 		common.Log.Trace("Returning cached object %d", objNumber)
 		return obj, false, nil
+	} else {
+		bakOffset := parser.GetFileOffset()
+		defer func() { parser.SetFileOffset(bakOffset) }()
 	}
 
 	xref, ok := parser.xrefs[objNumber]
@@ -348,9 +351,6 @@ func (parser *PdfParser) Trace(obj PdfObject) (PdfObject, error) {
 		// Direct object already.
 		return obj, nil
 	}
-
-	bakOffset := parser.GetFileOffset()
-	defer func() { parser.SetFileOffset(bakOffset) }()
 
 	o, err := parser.LookupByReference(*ref)
 	if err != nil {
