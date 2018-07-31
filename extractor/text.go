@@ -273,7 +273,7 @@ func (e *Extractor) ExtractText() (string, error) {
 				if xPos == -1 {
 					xPos = float64(*xfloat)
 				} else if xPos < float64(*xfloat) {
-					//buf.WriteString("\t")
+					buf.WriteString("\t")
 					xPos = float64(*xfloat)
 				}
 			case "TJ":
