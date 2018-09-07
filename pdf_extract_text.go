@@ -79,7 +79,7 @@ func parseText(this *pdf.PdfReader) (string, error) {
 	contentStreamChan := make(chan ContentPair, 10)
 
 	go func() {
-		for i := 2; i < len(pageList); i++ {
+		for i := 0; i < len(pageList); i++ {
 			if pageObjDict, ok := pageList[i].PdfObject.(*PdfObjectDictionary); ok {
 				if contentsArray, ok := pageObjDict.Get("Contents").(*PdfObjectArray); ok {
 					for j := 0; j < len(*contentsArray); j++ {
@@ -98,7 +98,6 @@ func parseText(this *pdf.PdfReader) (string, error) {
 					}
 				}
 			}
-			break
 		}
 		close(contentStreamChan)
 	}()
@@ -110,7 +109,7 @@ func parseText(this *pdf.PdfReader) (string, error) {
 				return "", err
 			}
 
-			//common.Log.Debug("stream data: %s", streamData)
+			common.Log.Trace("stream data: %s", streamData)
 
 			e := New(string(streamData), mFontsForPages[pair.index])
 			s, _ := e.ExtractText()

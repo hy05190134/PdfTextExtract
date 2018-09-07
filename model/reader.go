@@ -338,8 +338,16 @@ func (this *PdfReader) getFontInfo(font *Font) error {
 			if descendantFontDict, ok := descendantFontObj.(*PdfObjectDictionary); ok {
 				//handle Adobe-GB1, Adobe-CNS1, Adobe-Japan1, Adobe-Korea1 && other have handle
 				if fontSystemInfo, ok := descendantFontDict.Get("CIDSystemInfo").(*PdfObjectDictionary); ok {
-					register := fontSystemInfo.Get("Registry").(*PdfObjectString)
-					ordering := fontSystemInfo.Get("Ordering").(*PdfObjectString)
+					var register *PdfObjectString
+					if registryObj, err := this.parser.Trace(fontSystemInfo.Get("Registry")); err == nil {
+						register = registryObj.(*PdfObjectString)
+					}
+
+					var ordering *PdfObjectString
+					if orderingObj, err := this.parser.Trace(fontSystemInfo.Get("Ordering")); err == nil {
+						ordering = orderingObj.(*PdfObjectString)
+					}
+
 					supplement := fontSystemInfo.Get("Supplement").(*PdfObjectInteger)
 
 					registerOrdering := string(*register) + "-" + string(*ordering)
