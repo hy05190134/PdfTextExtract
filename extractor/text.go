@@ -41,6 +41,9 @@ func (e *Extractor) ExtractText() (string, error) {
 	preRect0, preRect1, preRect2, preRect3 := float64(-1), float64(-1), float64(-1), float64(-1)
 	rect0, rect1, rect2, rect3 := float64(-1), float64(-1), float64(-1), float64(-1)
 
+	fontSize := 0.0
+	mScaling := 100.0
+
 	processor.AddHandler(contentstream.HandlerConditionEnumAllOperands, "",
 		func(op *contentstream.ContentStreamOperation, f model.FontsByNames) error {
 			operand := op.Operand
@@ -101,6 +104,13 @@ func (e *Extractor) ExtractText() (string, error) {
 				}
 
 				common.Log.Trace("fontName: %s", fontName)
+
+				size, err := core.GetNumberAsFloat(op.Params[1])
+				if err != nil {
+					return errors.New("fontsize Float parse error")
+				} else {
+					fontSize = float64(size)
+				}
 
 				font = nil
 				codemap = nil
@@ -288,7 +298,9 @@ func (e *Extractor) ExtractText() (string, error) {
 				if !ok {
 					return fmt.Errorf("Invalid parameter type, no array (%T)", op.Params[0])
 				}
-				for _, obj := range *paramList {
+
+				sum := 0
+				for index, obj := range *paramList {
 					switch v := obj.(type) {
 					case *core.PdfObjectString:
 						//first change charcode to cid string
@@ -318,16 +330,35 @@ func (e *Extractor) ExtractText() (string, error) {
 								buf.WriteString(string(*v))
 							}
 						}
+
+						sum += len([]byte(*v))
+
+						if index == len(*paramList)-1 {
+							xPos += fontSize * float64(sum/2)
+							//default space size
+							xPos += 1.5
+						}
+
 					case *core.PdfObjectFloat:
-						if *v < -100 {
-							//buf.WriteString(" ")
-						}
+						xPos += float64(-*v) * (mScaling / 100.0) * fontSize / 1000.0
 					case *core.PdfObjectInteger:
-						if *v < -100 {
-							//buf.WriteString(" ")
-						}
+						xPos += float64(-*v) * (mScaling / 100.0) * fontSize / 1000.0
 					}
 				}
+			case "TZ":
+				if !inText {
+					common.Log.Debug("TZ operand outside text")
+					return nil
+				}
+				if len(op.Params) < 1 {
+					return nil
+				}
+				param, ok := op.Params[0].(*core.PdfObjectInteger)
+				if !ok {
+					return fmt.Errorf("Invalid parameter type, not integer (%T)", op.Params[0])
+				}
+
+				mScaling = float64(*param)
 			case "Tj":
 				if !inText {
 					common.Log.Debug("Tj operand outside text")
