@@ -42,6 +42,7 @@ func (e *Extractor) ExtractText() (string, error) {
 	rect0, rect1, rect2, rect3 := float64(-1), float64(-1), float64(-1), float64(-1)
 
 	fontSize := 0.0
+	mScaling := 100.0
 
 	processor.AddHandler(contentstream.HandlerConditionEnumAllOperands, "",
 		func(op *contentstream.ContentStreamOperation, f model.FontsByNames) error {
@@ -330,22 +331,34 @@ func (e *Extractor) ExtractText() (string, error) {
 							}
 						}
 
-						sum += len([]byte(*v)) / 2
+						sum += len([]byte(*v))
 
 						if index == len(*paramList)-1 {
-							xPos += fontSize * float64(sum)
+							xPos += fontSize * float64(sum/2)
+							//default space size
+							xPos += 1.5
 						}
 
 					case *core.PdfObjectFloat:
-						if *v < -100 {
-							//buf.WriteString(" ")
-						}
+						xPos += float64(-*v) * (mScaling / 100.0) * fontSize / 1000.0
 					case *core.PdfObjectInteger:
-						if *v < -100 {
-							//buf.WriteString(" ")
-						}
+						xPos += float64(-*v) * (mScaling / 100.0) * fontSize / 1000.0
 					}
 				}
+			case "TZ":
+				if !inText {
+					common.Log.Debug("TZ operand outside text")
+					return nil
+				}
+				if len(op.Params) < 1 {
+					return nil
+				}
+				param, ok := op.Params[0].(*core.PdfObjectInteger)
+				if !ok {
+					return fmt.Errorf("Invalid parameter type, not integer (%T)", op.Params[0])
+				}
+
+				mScaling = float64(*param)
 			case "Tj":
 				if !inText {
 					common.Log.Debug("Tj operand outside text")
