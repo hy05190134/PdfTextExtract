@@ -297,6 +297,8 @@ func (e *Extractor) ExtractText() (string, error) {
 				if !ok {
 					return fmt.Errorf("Invalid parameter type, no array (%T)", op.Params[0])
 				}
+
+				sum := 0
 				for index, obj := range *paramList {
 					switch v := obj.(type) {
 					case *core.PdfObjectString:
@@ -328,8 +330,10 @@ func (e *Extractor) ExtractText() (string, error) {
 							}
 						}
 
+						sum += len([]byte(*v)) / 2
+
 						if index == len(*paramList)-1 {
-							xPos += fontSize * float64(len(*paramList)/2)
+							xPos += fontSize * float64(sum)
 						}
 
 					case *core.PdfObjectFloat:
