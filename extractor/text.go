@@ -41,6 +41,8 @@ func (e *Extractor) ExtractText() (string, error) {
 	preRect0, preRect1, preRect2, preRect3 := float64(-1), float64(-1), float64(-1), float64(-1)
 	rect0, rect1, rect2, rect3 := float64(-1), float64(-1), float64(-1), float64(-1)
 
+	fontSize := 0.0
+
 	processor.AddHandler(contentstream.HandlerConditionEnumAllOperands, "",
 		func(op *contentstream.ContentStreamOperation, f model.FontsByNames) error {
 			operand := op.Operand
@@ -101,6 +103,13 @@ func (e *Extractor) ExtractText() (string, error) {
 				}
 
 				common.Log.Trace("fontName: %s", fontName)
+
+				size, err := core.GetNumberAsFloat(op.Params[1])
+				if err != nil {
+					return errors.New("fontsize Float parse error")
+				} else {
+					fontSize = float64(size)
+				}
 
 				font = nil
 				codemap = nil
@@ -288,7 +297,7 @@ func (e *Extractor) ExtractText() (string, error) {
 				if !ok {
 					return fmt.Errorf("Invalid parameter type, no array (%T)", op.Params[0])
 				}
-				for _, obj := range *paramList {
+				for index, obj := range *paramList {
 					switch v := obj.(type) {
 					case *core.PdfObjectString:
 						//first change charcode to cid string
@@ -318,6 +327,11 @@ func (e *Extractor) ExtractText() (string, error) {
 								buf.WriteString(string(*v))
 							}
 						}
+
+						if index == len(*paramList)-1 {
+							xPos += fontSize * float64(len(*paramList)/2)
+						}
+
 					case *core.PdfObjectFloat:
 						if *v < -100 {
 							//buf.WriteString(" ")
