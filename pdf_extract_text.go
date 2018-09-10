@@ -12,6 +12,7 @@ import (
 	. "./extractor"
 	pdf "./model"
 	"fmt"
+	"github.com/otiai10/gosseract"
 	"io/ioutil"
 	"os"
 	//"runtime"
@@ -75,8 +76,13 @@ func parseText(this *pdf.PdfReader) (string, error) {
 	pageList := this.GetPageList()
 	parser := this.GetParser()
 	mFontsForPages := this.GetFontsForPages()
+	mPageResources := this.GetPageResources()
 
 	contentStreamChan := make(chan ContentPair, 10)
+
+	client := gosseract.NewClient()
+	client.SetLanguage("chi_sim", "eng")
+	defer client.Close()
 
 	go func() {
 		for i := 0; i < len(pageList); i++ {
@@ -95,6 +101,23 @@ func parseText(this *pdf.PdfReader) (string, error) {
 				} else if contentObj, err := parser.Trace(pageObjDict.Get("Contents")); err == nil {
 					if contentStmObj, ok := contentObj.(*PdfObjectStream); ok {
 						contentStreamChan <- ContentPair{contentStmObj, i}
+					}
+				}
+			}
+
+			//switch off
+			if false {
+				if xObjectObjDict, ok := mPageResources[i].Get("XObject").(*PdfObjectDictionary); ok {
+					common.Log.Debug("xobject %s", xObjectObjDict)
+					for imgName, _ := range xObjectObjDict.Dict() {
+						common.Log.Debug("picture: %s try to ocr", imgName)
+						if imageObj, err := parser.Trace(xObjectObjDict.Get(imgName)); err == nil {
+							if imageObjStm, ok := imageObj.(*PdfObjectStream); ok {
+								client.SetImageFromBytes(imageObjStm.Stream)
+								text, _ := client.Text()
+								common.Log.Debug("image text: %s", text)
+							}
+						}
 					}
 				}
 			}

@@ -845,6 +845,10 @@ func (this *PdfReader) GetFontsForPages() []FontsByNames {
 	return this.mFontsForPages
 }
 
+func (this *PdfReader) GetPageResources() []*PdfObjectDictionary {
+	return this.pageResources
+}
+
 func (this *PdfReader) GetTrailer() (*PdfObjectDictionary, error) {
 	trailerDict := this.parser.GetTrailer()
 	if trailerDict == nil {
