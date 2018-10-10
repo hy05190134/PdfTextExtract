@@ -36,10 +36,12 @@ func (e *Extractor) ExtractText() (string, error) {
 	var cidCodemap *cmap.CMap
 	var font *model.Font
 	inText := false
-	xPos, yPos := float64(-1), float64(-1)
+	xPos, yPos, xTx := float64(-1), float64(-1), float64(-1)
 
 	preRect0, preRect1, preRect2, preRect3 := float64(-1), float64(-1), float64(-1), float64(-1)
 	rect0, rect1, rect2, rect3 := float64(-1), float64(-1), float64(-1), float64(-1)
+
+	var cMatrix [6]float64 = [6]float64{1, 0, 0, 1, 0, 0}
 
 	fontSize := 0.0
 	mScaling := 100.0
@@ -48,6 +50,23 @@ func (e *Extractor) ExtractText() (string, error) {
 		func(op *contentstream.ContentStreamOperation, f model.FontsByNames) error {
 			operand := op.Operand
 			switch operand {
+			case "cm":
+				if inText {
+					common.Log.Debug("cm operand outside text")
+					return nil
+				}
+				if len(op.Params) != 6 {
+					common.Log.Debug("Error cm should only get 6 input params, got %d", len(op.Params))
+					return errors.New("Incorrect parameter count")
+				}
+
+				for i := 0; i < 6; i++ {
+					cMatrix[i], err = core.GetNumberAsFloat(op.Params[i])
+					if err != nil {
+						common.Log.Debug("cm Float parse error")
+						return nil
+					}
+				}
 			case "re":
 				if inText {
 					common.Log.Debug("re operand outside text")
@@ -231,6 +250,7 @@ func (e *Extractor) ExtractText() (string, error) {
 				}
 
 				if tx > 0 {
+					xTx = tx
 					//buf.WriteString(" ")
 				}
 				if ty < 0 {
@@ -269,10 +289,17 @@ func (e *Extractor) ExtractText() (string, error) {
 
 				if yPos == -1 {
 					yPos = float64(*yfloat)
-				} else if yPos > float64(*yfloat) {
+				} else if cMatrix[3]*yPos > cMatrix[3]*float64(*yfloat) {
 					if rect0 != preRect0 || rect1 != preRect1 || rect2 != preRect2 || rect3 != preRect3 {
 						buf.WriteString("\n")
 					}
+
+					//temp bugfix for using TD and next line
+					xPos += -(xTx*cMatrix[0]*fontSize/1000.0 + fontSize)
+					if xPos < float64(*xfloat) {
+						buf.WriteString("\n")
+					}
+
 					xPos = float64(*xfloat)
 					yPos = float64(*yfloat)
 					return nil
