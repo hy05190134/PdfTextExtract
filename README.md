@@ -7,6 +7,6 @@
 ## TODO
 * realize the same format with the origin pdf document
 
-## optimise
+## OPTIMIZE
 * parallel extract the text, promote 30% performance (&radic;)
 * full use the design of schedule of golang and optimise string join, promote 30% performance (&radic;)
