@@ -11,6 +11,7 @@ import (
 	. "./core"
 	. "./extractor"
 	pdf "./model"
+	"bytes"
 	"fmt"
 	"github.com/otiai10/gosseract"
 	"io/ioutil"
@@ -72,7 +73,6 @@ type ContentPair struct {
 }
 
 func parseText(this *pdf.PdfReader) (string, error) {
-	text := ""
 	pageList := this.GetPageList()
 	parser := this.GetParser()
 	mFontsForPages := this.GetFontsForPages()
@@ -95,12 +95,18 @@ func parseText(this *pdf.PdfReader) (string, error) {
 							continue
 						}
 						if contentStmObj, ok := contentObj.(*PdfObjectStream); ok {
-							contentStreamChan <- ContentPair{contentStmObj, i}
+							select {
+							case contentStreamChan <- ContentPair{contentStmObj, i}:
+							default:
+							}
 						}
 					}
 				} else if contentObj, err := parser.Trace(pageObjDict.Get("Contents")); err == nil {
 					if contentStmObj, ok := contentObj.(*PdfObjectStream); ok {
-						contentStreamChan <- ContentPair{contentStmObj, i}
+						select {
+						case contentStreamChan <- ContentPair{contentStmObj, i}:
+						default:
+						}
 					}
 				}
 			}
@@ -125,6 +131,7 @@ func parseText(this *pdf.PdfReader) (string, error) {
 		close(contentStreamChan)
 	}()
 
+	var textBuffer bytes.Buffer
 	for {
 		if pair, ok := <-contentStreamChan; ok {
 			streamData, err := DecodeStream(pair.s)
@@ -136,14 +143,14 @@ func parseText(this *pdf.PdfReader) (string, error) {
 
 			e := New(string(streamData), mFontsForPages[pair.index])
 			s, _ := e.ExtractText()
-			text += s
-			text += "\n\n"
+			textBuffer.WriteString(s)
+			textBuffer.WriteString("\n\n")
 		} else {
 			break
 		}
 	}
 
-	return text, nil
+	return textBuffer.String(), nil
 }
 
 // outputPdfText prints out contents of PDF file to stdout.
