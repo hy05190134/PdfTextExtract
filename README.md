@@ -5,5 +5,8 @@
 * represent the block merge text using simple matrix calculate
 
 ## TODO
-* parallel extract the text, promote 30% performance (&radic;)
 * realize the same format with the origin pdf document
+
+## optimise
+* parallel extract the text, promote 30% performance (&radic;)
+* full use the design of schedule of golang and optimise string join, promote 30% performance (&radic;)
