@@ -16,6 +16,7 @@ import (
 	"github.com/otiai10/gosseract"
 	"io/ioutil"
 	"os"
+	"time"
 	//"runtime"
 	"strings"
 )
@@ -95,17 +96,27 @@ func parseText(this *pdf.PdfReader) (string, error) {
 							continue
 						}
 						if contentStmObj, ok := contentObj.(*PdfObjectStream); ok {
-							select {
-							case contentStreamChan <- ContentPair{contentStmObj, i}:
-							default:
+							produce := true
+							for produce {
+								select {
+								case contentStreamChan <- ContentPair{contentStmObj, i}:
+									produce = false
+								default:
+									time.Sleep(2 * time.Millisecond)
+								}
 							}
 						}
 					}
 				} else if contentObj, err := parser.Trace(pageObjDict.Get("Contents")); err == nil {
 					if contentStmObj, ok := contentObj.(*PdfObjectStream); ok {
-						select {
-						case contentStreamChan <- ContentPair{contentStmObj, i}:
-						default:
+						produce := true
+						for produce {
+							select {
+							case contentStreamChan <- ContentPair{contentStmObj, i}:
+								produce = false
+							default:
+								time.Sleep(2 * time.Millisecond)
+							}
 						}
 					}
 				}
