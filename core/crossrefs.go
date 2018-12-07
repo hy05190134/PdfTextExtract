@@ -116,10 +116,7 @@ func (parser *PdfParser) lookupObjectViaOS(sobjNumber int, objNum int) (PdfObjec
 		common.Log.Trace("Decoded: %s", ds)
 
 		// Temporarily change the reader object to this decoded buffer.
-		// Change back afterwards.
-		bakOffset := parser.GetFileOffset()
-		defer func() { parser.SetFileOffset(bakOffset) }()
-
+		// no need to change back afterwards because upper already done.
 		bufReader = bytes.NewReader(ds)
 		parser.reader = bufio.NewReader(bufReader)
 
@@ -158,13 +155,8 @@ func (parser *PdfParser) lookupObjectViaOS(sobjNumber int, objNum int) (PdfObjec
 		parser.objstms[sobjNumber] = objstm
 	} else {
 		// Temporarily change the reader object to this decoded buffer.
-		// Point back afterwards.
-		bakOffset := parser.GetFileOffset()
-		defer func() { parser.SetFileOffset(bakOffset) }()
-
+		// no need to back afterwards because upper already done.
 		bufReader = bytes.NewReader(objstm.ds)
-		// Temporarily change the reader object to this decoded buffer.
-		parser.reader = bufio.NewReader(bufReader)
 	}
 
 	offset := objstm.offsets[objNum]
