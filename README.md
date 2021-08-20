@@ -3,7 +3,7 @@
 ## SUPPORT
 * used to parse pdf and extract text
 * represent the block merge text using simple matrix calculate
-* 针对某些收费 pdf 编辑器编辑保存后带水印，可以提供有偿去水印服务，具体收费可以邮件咨询.
+* 可以提供有偿提供 PDF 去水印服务，具体联系 hy05190134@qq.com
 
 ## TODO
 * realize the same format with the origin pdf document
